@@ -1,0 +1,194 @@
+#!/bin/bash
+#
+# Calculate averages and medians for columns or rows
+
+#######################################
+# Calculate averages and medians 
+# Arguments:
+#		file or stdin_file 
+# Returns:
+#		To main function
+#######################################
+function calculate () {
+	#Initialize variables for calculation
+	count=1
+	col_sum=0
+	avg=0
+	median=0
+	lines=$(wc -l < "$1") #Read the number of lines from file
+	total=$(wc -w < "$1") #Read the total number of characters from file
+	let rows=$(echo "$total/$lines") #Number of rows is the total/lines
+	echo "Average:	Median:" 
+
+	#Begin the loop for calculating the avg and median for each variable
+	while (( count < rows+1 ))
+	do
+		col_sum=0
+		cut -f "$count" $1 > output_file #Cut first column to output_file
+		sort output_file > sorted_output #Sort output_file in order to calculate the median
+		while read -a col #Loop through the column
+		do 	
+			let col_sum=$col_sum+$col #Add up the values in the column to get total sum
+		done < sorted_output
+		avg=$(echo "scale=2; $col_sum/$lines" | bc ) #Calculate the average 
+		avg=$(echo "($avg+0.5)/1" | bc ) #.0-.4 round down, .5-.9 round up
+		if [ $lines%2 = 0 ]; then #Checks if the remainder is 0
+			let half="$lines/2"
+			while read val 
+			do 
+				let median=$(head -n "$lines" | tail -n "$half") #Calculates the median
+			done < sorted_output
+		elif [ "$2" = "row" ]; then #Checks to see if calculating rows
+			let half=$((1+$lines/2))
+			while read val 
+			do 
+				if [ $total -eq 1 ]; then
+					let median=$val
+				else 
+					let median=$(head -n "$lines" | tail -n "$half") #Calculates the median
+				fi
+			done < sorted_output
+		else 
+			let half="$lines/2"
+			while read val 
+			do 
+				if [ $total -eq 1 ]; then
+					let median=$val
+				else 
+					let median=$(head -n "$lines" | tail -n "$half") #Calculates the median
+				fi
+			done < sorted_output
+		fi
+		echo "$avg 		$median" #Prints out value for average and median
+		let count=count+1
+	done 
+	clean
+}
+
+#######################################
+# Awk function which swaps the rows and columns
+# Arguments:
+#		File to swap
+# Returns:
+# 	Puts swapped values into swap_output file
+# Notes:
+# 	If the program is supplied with a file where the columns are seperated
+#		by spaces, it would not handle correctly. This function swaps the 
+#		rows and columns, and also seperated them by tabs to allow the program
+#		to process correctly.
+#######################################
+function swap () {
+	awk ' {
+		for (i=1; i<=NF; i++) {
+			a[NR,i] = $i
+		}
+	}
+	NF>p { p = NF }
+	END {
+		for(j=1; j<=p; j++) {
+			str=a[1,j]
+			for(i=2; i<=NR; i++) {
+				str=str"\t"a[i,j];
+			}
+			print str > "swap_output"
+		}
+	} ' $1 #Takes input from the argument passed to function
+}
+
+#######################################
+# Removes any of the files created at runtime
+# Arguments:
+#		None
+# Returns:
+# 	Removes all files if they exist
+#######################################
+function clean () {
+	if test -e "line_number"; then
+		rm -f line_number
+	fi
+	if test -e "output_file"; then
+		rm -f output_file
+	fi
+	if test -e "sorted_output"; then
+		rm -f sorted_output
+	fi
+	if test -e "stdin_file"; then
+		rm -f stdin_file
+	fi
+	if test -e "swap_output"; then
+		rm -f swap_output
+	fi
+	if test -e "stdin"; then
+		rm -f stdin
+	fi
+	exit 
+}
+
+#Validates input from user
+#Checks first parameter is either -r* or -c*
+#Checks to see if the pattern matches i.e. -rrr still calculates rows
+if [[ $1 != -r* && $1 != -c* ]]; then
+	>&2 echo "Usage: stats {-rows|-cols} [input_file]"
+	exit 1
+fi
+
+#Checks for Standard Input from the command line
+#Checks the number of command line arguments to be equal to one
+if [ $# -eq 1 ]; then
+	cat /dev/stdin > stdin
+	#If first argument matches, call swap function to swap columns and rows
+	if [[ $1 == -r* ]]; then
+		swap $stdin
+		stdin_file=swap_output
+		calculate $stdin_file
+	#If first argument matches pattern, call swap function twice
+	#This gives the original input but in a formatted tabbed version 
+	elif [[ $1 == -c* ]]; then
+		swap $stdin
+		stdin_file=swap_output
+		swap $stdin
+		stdin_file=swap_output
+		calculate $stdin_file
+	#If argument does not match patter, print usage and quit
+	else 
+		>&2 echo "Usage: stats {-rows|-cols} [input_file]"
+		exit 1
+	fi
+	clean #Cleanup files before quitting
+	exit 
+#Checks for two arguments
+#If more not equal to two, print usage and quit
+elif [ $# -ne 2 ]; then
+	>&2 echo "Usage: stats {-rows|-cols} [input_file]"
+	exit 1
+fi
+#Checks arguements to be greater than one
+if [ $# -gt 1 ]; then
+	file=$2 #Sets the file as the second argument passed from command line
+	if test -r "$file"; then #Test to see if the file has read permission
+		if test -s "$file"; then #Test to see if the file is not zero size
+			#If first argument matches, call swap function to swap columns and rows
+			if [[ $1 == -r* ]]; then
+				swap $file 
+				file=swap_output
+				calculate $file row
+			#If first argument matches pattern, call swap function twice
+			#This gives the original input but in a formatted tabbed version
+			elif [[ $1 == -c* ]]; then
+				swap $file 
+				file=swap_output
+				swap $file
+				calculate $file 
+			fi
+			exit 
+		else #If file is empty, print error and exit
+			>&2 echo "File is empty"
+			exit 1
+		fi
+	else #If file is not readable, print error and exit
+		>&2 echo "I'm sorry. I can't read that file."
+		exit 1
+	fi
+fi
+clean #Cleanup files before quitting
+trap "clean; exit" SIGTERM SIGKILL TERM INT KILL  #Trap which will clean up files & exit

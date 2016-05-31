@@ -1,0 +1,13 @@
+#!/bin/bash
+
+make 
+
+./stinek.adventure 
+
+cd stinek.adventure.[0-9]*
+
+ls 
+
+cd ..
+
+make clean
